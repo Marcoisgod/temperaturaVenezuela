@@ -19,7 +19,7 @@ st.title("🌡️ Temperaturas Actuales por Estado de Venezuela")
 st.markdown("""
 Sistema de adquisición de datos meteorológicos en tiempo real utilizando:
 
-- API Open-Meteo (Petición masiva optimizada)
+- API Open-Meteo
 - Streamlit
 - Plotly
 - GeoJSON de los estados de Venezuela
@@ -75,50 +75,53 @@ def interpretar_clima(codigo):
     return clima.get(codigo, "Sin datos")
 
 # ==========================================
-# ADQUISICIÓN DE DATOS MASIVA (OPTIMIZADA)
+# FUNCIÓN PARA OBTENER TEMPERATURA
 # ==========================================
 
 @st.cache_data(ttl=600)
-def cargar_datos_masivos():
-    # Extraemos y agrupamos todas las latitudes y longitudes en cadenas separadas por comas
-    lats = ",".join([str(coords[0]) for coords in ESTADOS.values()])
-    lons = ",".join([str(coords[1]) for coords in ESTADOS.values()])
-    
-    # URL modificada con el endpoint optimizado para evitar el error 429 en servidores compartidos
+def obtener_clima(lat, lon):
     url = (
-        f"https://commercial-api.open-meteo.com/v1/forecast?"
-        f"latitude={lats}"
-        f"&longitude={lons}"
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lat}"
+        f"&longitude={lon}"
         f"&current=temperature_2m,relative_humidity_2m,weather_code"
     )
-    
-    registros = []
-    
     try:
-        respuesta = requests.get(url, timeout=15)
+        respuesta = requests.get(url, timeout=10)
         if respuesta.status_code == 200:
-            datos_api = respuesta.json()
-            
-            if isinstance(datos_api, dict):
-                datos_lista = [datos_api]
-            else:
-                datos_lista = datos_api
-                
-            for i, (estado, (lat, lon)) in enumerate(ESTADOS.items()):
-                current_data = datos_lista[i]["current"]
-                registros.append({
-                    "Estado": estado,
-                    "Latitud": lat,
-                    "Longitud": lon,
-                    "Temperatura": current_data["temperature_2m"],
-                    "Humedad": current_data["relative_humidity_2m"],
-                    "Clima": interpretar_clima(current_data["weather_code"])
-                })
-        else:
-            st.error(f"Error de la API de clima. Código de respuesta: {respuesta.status_code}")
-    except Exception as e:
-        st.error(f"Ocurrió un error en la conexión de red: {e}")
-        
+            datos = respuesta.json()["current"]
+            return {
+                "temperatura": datos["temperature_2m"],
+                "humedad": datos["relative_humidity_2m"],
+                "codigo": datos["weather_code"]
+            }
+    except:
+        pass
+    return None
+
+# ==========================================
+# ADQUISICIÓN DE DATOS
+# ==========================================
+
+def cargar_datos():
+    registros = []
+    progreso = st.progress(0)
+    total = len(ESTADOS)
+
+    for i, (estado, (lat, lon)) in enumerate(ESTADOS.items()):
+        clima = obtener_clima(lat, lon)
+        if clima:
+            registros.append({
+                "Estado": estado,
+                "Latitud": lat,
+                "Longitud": lon,
+                "Temperatura": clima["temperatura"],
+                "Humedad": clima["humedad"],
+                "Clima": interpretar_clima(clima["codigo"])
+            })
+        progreso.progress((i + 1) / total)
+    
+    progreso.empty()
     return pd.DataFrame(registros)
 
 # ==========================================
@@ -132,11 +135,11 @@ if st.button("🔄 Actualizar Temperaturas"):
 # CARGA DE DATOS
 # ==========================================
 
-with st.spinner("Consultando temperaturas actuales en tiempo real..."):
-    df = cargar_datos_masivos()
+with st.spinner("Consultando temperaturas actuales..."):
+    df = cargar_datos()
 
 # ==========================================
-# INDICADORES Y GRÁFICOS
+# INDICADORES
 # ==========================================
 
 if not df.empty:
@@ -220,7 +223,7 @@ if not df.empty:
             df,
             geojson=geojson,
             locations="Estado",
-            featureidkey="properties.nombre", 
+            featureidkey="properties.nombre", # <--- Coincide exactamente con el JSON de arriba
             color="Temperatura",
             hover_name="Estado",
             color_continuous_scale="RdYlBu_r",
@@ -232,6 +235,7 @@ if not df.empty:
             }
         )
 
+        # Configuramos para ver el fondo continental y centrar en Venezuela
         fig.update_geos(
             scope="south america",
             center=dict(lat=8.0, lon=-66.0),
@@ -257,7 +261,7 @@ if not df.empty:
         """)
 
     # ==========================================
-    # MAPA ALTERNATIVO
+    # MAPA ALTERNATIVO (SÓLO SI NO HAY GEOJSON O COMO COMPLEMENTO)
     # ==========================================
     if not geojson_cargado:
         fig_puntos = px.scatter_geo(
@@ -292,7 +296,7 @@ if not df.empty:
         st.plotly_chart(fig_puntos, use_container_width=True)
 
 else:
-    st.error("No se pudieron recopilar datos climáticos en este momento. La estructura de respuesta falló.")
+    st.error("No se pudieron obtener datos meteorológicos en este momento. Revisa tu conexión a internet.")
 
 # ==========================================
 # PIE DE PÁGINA
