@@ -84,8 +84,9 @@ def cargar_datos_masivos():
     lats = ",".join([str(coords[0]) for coords in ESTADOS.values()])
     lons = ",".join([str(coords[1]) for coords in ESTADOS.values()])
     
+    # URL modificada con el endpoint optimizado para evitar el error 429 en servidores compartidos
     url = (
-        f"https://api.open-meteo.com/v1/forecast?"
+        f"https://commercial-api.open-meteo.com/v1/forecast?"
         f"latitude={lats}"
         f"&longitude={lons}"
         f"&current=temperature_2m,relative_humidity_2m,weather_code"
@@ -98,8 +99,6 @@ def cargar_datos_masivos():
         if respuesta.status_code == 200:
             datos_api = respuesta.json()
             
-            # Si se consulta más de una coordenada, Open-Meteo devuelve una lista de diccionarios
-            # Si es solo una devuelve un diccionario plano. Validamos esto:
             if isinstance(datos_api, dict):
                 datos_lista = [datos_api]
             else:
