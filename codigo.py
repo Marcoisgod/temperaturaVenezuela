@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.express as px
 import json
+import time
 from datetime import datetime
 
 # ==========================================
@@ -75,51 +76,55 @@ def interpretar_clima(codigo):
     return clima.get(codigo, "Sin datos")
 
 # ==========================================
-# ADQUISICIÓN DE DATOS MASIVA (OPTIMIZADA)
+# ADQUISICIÓN DE DATOS (CON REINTENTOS)
 # ==========================================
 
-@st.cache_data(ttl=600)
-def cargar_datos_masivos():
-    # Extraemos y agrupamos todas las latitudes y longitudes en cadenas separadas por comas
-    lats = ",".join([str(coords[0]) for coords in ESTADOS.values()])
-    lons = ",".join([str(coords[1]) for coords in ESTADOS.values()])
-    
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+def obtener_clima_estado(estado, lat, lon, reintentos=4):
+    """Consulta el clima de un estado con reintentos ante error 429."""
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lats}"
-        f"&longitude={lons}"
+        f"latitude={lat}&longitude={lon}"
         f"&current=temperature_2m,relative_humidity_2m,weather_code"
     )
-    
-    registros = []
-    
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        respuesta = requests.get(url, headers=headers, timeout=15)
-        if respuesta.status_code == 200:
-            datos_api = respuesta.json()
-            
-            # Si se consulta más de una coordenada, Open-Meteo devuelve una lista de diccionarios
-            if isinstance(datos_api, dict):
-                datos_lista = [datos_api]
-            else:
-                datos_lista = datos_api
-                
-            for i, (estado, (lat, lon)) in enumerate(ESTADOS.items()):
-                current_data = datos_lista[i]["current"]
-                registros.append({
+    for intento in range(reintentos):
+        try:
+            respuesta = requests.get(url, headers=HEADERS, timeout=15)
+            if respuesta.status_code == 200:
+                datos = respuesta.json().get("current", {})
+                return {
                     "Estado": estado,
                     "Latitud": lat,
                     "Longitud": lon,
-                    "Temperatura": current_data["temperature_2m"],
-                    "Humedad": current_data["relative_humidity_2m"],
-                    "Clima": interpretar_clima(current_data["weather_code"])
-                })
-        else:
-            st.error(f"Error de la API de clima. Código de respuesta: {respuesta.status_code}")
-    except Exception as e:
-        st.error(f"Ocurrió un error en la conexión de red: {e}")
-        
+                    "Temperatura": datos.get("temperature_2m"),
+                    "Humedad": datos.get("relative_humidity_2m"),
+                    "Clima": interpretar_clima(datos.get("weather_code"))
+                }
+            elif respuesta.status_code == 429:
+                # Esperamos más tiempo en cada reintento (backoff exponencial)
+                espera = 2 ** intento
+                time.sleep(espera)
+            else:
+                break
+        except Exception:
+            time.sleep(2)
+    return None
+
+@st.cache_data(ttl=3600)  # Cache de 1 hora para reducir llamadas a la API
+def cargar_datos_masivos():
+    registros = []
+    progreso = st.progress(0, text="Iniciando consulta...")
+    total = len(ESTADOS)
+
+    for i, (estado, (lat, lon)) in enumerate(ESTADOS.items()):
+        progreso.progress((i + 1) / total, text=f"Consultando {estado}...")
+        dato = obtener_clima_estado(estado, lat, lon)
+        if dato:
+            registros.append(dato)
+        time.sleep(0.3)  # Pequeña pausa entre peticiones para evitar rate limit
+
+    progreso.empty()
     return pd.DataFrame(registros)
 
 # ==========================================
