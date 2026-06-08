@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.express as px
 import json
+import time
 from datetime import datetime
 
 # ==========================================
@@ -18,11 +19,7 @@ st.set_page_config(
 st.title("🌡️ Temperaturas Actuales por Estado de Venezuela")
 st.markdown("""
 Sistema de adquisición de datos meteorológicos en tiempo real utilizando:
-
-- API Open-Meteo
-- Streamlit
-- Plotly
-- GeoJSON de los estados de Venezuela
+- **API wttr.in** · Streamlit · Plotly · GeoJSON Venezuela
 """)
 
 # ==========================================
@@ -55,79 +52,50 @@ ESTADOS = {
     "Zulia":         (10.6545,  -71.6533),
 }
 
-def interpretar_clima(codigo):
-    tabla = {
-        0:  "Despejado",
-        1:  "Mayormente despejado",
-        2:  "Parcialmente nublado",
-        3:  "Nublado",
-        45: "Neblina",
-        48: "Niebla",
-        51: "Llovizna ligera",
-        61: "Lluvia ligera",
-        63: "Lluvia moderada",
-        65: "Lluvia fuerte",
-        71: "Nevada ligera",
-        80: "Chubascos",
-        95: "Tormenta",
-    }
-    return tabla.get(codigo, "Sin datos")
+# ==========================================
+# ADQUISICIÓN DE DATOS — API wttr.in
+# (gratuita, sin key, funciona en la nube)
+# ==========================================
 
-# ==========================================
-# ADQUISICIÓN DE DATOS — una sola petición
-# batch a Open-Meteo con hasta 2 reintentos
-# ==========================================
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
+def obtener_clima_wttr(estado, lat, lon):
+    """Consulta wttr.in para una coordenada."""
+    url = f"https://wttr.in/{lat},{lon}?format=j1"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            cc = data["current_condition"][0]
+            return {
+                "Estado":      estado,
+                "Latitud":     lat,
+                "Longitud":    lon,
+                "Temperatura": float(cc["temp_C"]),
+                "Humedad":     int(cc["humidity"]),
+                "Clima":       cc["weatherDesc"][0]["value"],
+            }
+    except Exception:
+        pass
+    return None
 
 @st.cache_data(ttl=3600)
 def cargar_datos():
-    lats = ",".join(str(c[0]) for c in ESTADOS.values())
-    lons = ",".join(str(c[1]) for c in ESTADOS.values())
-    url  = (
-        "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lats}&longitude={lons}"
-        "&current=temperature_2m,relative_humidity_2m,weather_code"
-        "&forecast_days=1"
-    )
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0 Safari/537.36"
-        )
-    }
-
-    for intento in range(3):
-        try:
-            r = requests.get(url, headers=headers, timeout=30)
-            if r.status_code == 200:
-                datos = r.json()
-                if isinstance(datos, dict):
-                    datos = [datos]
-                registros = []
-                for (estado, (lat, lon)), bloque in zip(ESTADOS.items(), datos):
-                    cur = bloque.get("current", {})
-                    registros.append({
-                        "Estado":      estado,
-                        "Latitud":     lat,
-                        "Longitud":    lon,
-                        "Temperatura": cur.get("temperature_2m"),
-                        "Humedad":     cur.get("relative_humidity_2m"),
-                        "Clima":       interpretar_clima(cur.get("weather_code")),
-                    })
-                return pd.DataFrame(registros)
-            elif r.status_code == 429:
-                # Rate-limit: espera y reintenta (máximo 2 veces)
-                if intento < 2:
-                    import time; time.sleep(30)
-                continue
-            else:
-                return pd.DataFrame(), r.status_code
-        except Exception as e:
-            if intento == 2:
-                return pd.DataFrame(), str(e)
-            import time; time.sleep(10)
-
-    return pd.DataFrame(), 429
+    """Carga el clima de todos los estados. Pura: sin llamadas a st.*"""
+    registros = []
+    for estado, (lat, lon) in ESTADOS.items():
+        dato = obtener_clima_wttr(estado, lat, lon)
+        if dato:
+            registros.append(dato)
+        time.sleep(0.4)   # pausa educada entre peticiones
+    return pd.DataFrame(registros)
 
 # ==========================================
 # BOTÓN DE ACTUALIZACIÓN
@@ -142,15 +110,7 @@ if st.button("🔄 Actualizar Temperaturas"):
 # ==========================================
 
 with st.spinner("🌐 Consultando temperaturas actuales..."):
-    resultado = cargar_datos()
-
-# cargar_datos() puede retornar un DataFrame solo (éxito)
-# o una tupla (DataFrame_vacío, código_error) si falló
-if isinstance(resultado, tuple):
-    df, error = resultado
-else:
-    df    = resultado
-    error = None
+    df = cargar_datos()
 
 # ==========================================
 # INDICADORES Y GRÁFICOS
@@ -191,7 +151,7 @@ if df is not None and not df.empty:
     )
     st.plotly_chart(fig_bar, width="stretch")
 
-    # ---- Mapa choropleth -------------------------------------
+    # ---- Mapa choropleth ------------------------------------
     st.subheader("🗺️ Mapa de Temperaturas")
     try:
         with open("venezuela_estados.geojson", "r", encoding="utf-8") as f:
@@ -216,7 +176,6 @@ if df is not None and not df.empty:
         st.plotly_chart(fig_map, width="stretch")
 
     except FileNotFoundError:
-        # Mapa alternativo de puntos si no hay GeoJSON
         fig_pts = px.scatter_geo(
             df, lat="Latitud", lon="Longitud",
             hover_name="Estado", text="Temperatura",
@@ -227,24 +186,16 @@ if df is not None and not df.empty:
         fig_pts.update_traces(textposition="top center",
                               marker=dict(size=12, color="red"))
         fig_pts.update_geos(
-            scope="south america",
-            center=dict(lat=8.0, lon=-66.0),
+            scope="south america", center=dict(lat=8.0, lon=-66.0),
             projection_scale=6, visible=True, showcountries=True,
         )
         st.plotly_chart(fig_pts, width="stretch")
 
 else:
-    if error == 429:
-        st.warning(
-            "⚠️ La API de clima tiene el acceso temporalmente limitado desde este servidor. "
-            "Esto ocurre cuando muchas apps en Streamlit Cloud consultan la misma API al mismo tiempo. "
-            "Espera unos minutos y presiona **🔄 Actualizar Temperaturas**."
-        )
-    else:
-        st.error(
-            f"❌ No se pudieron obtener datos meteorológicos. "
-            f"Detalle: `{error}`. Revisa tu conexión e intenta de nuevo."
-        )
+    st.error(
+        "❌ No se pudieron obtener datos meteorológicos. "
+        "Verifica tu conexión e intenta de nuevo con **🔄 Actualizar Temperaturas**."
+    )
 
 # ==========================================
 # PIE DE PÁGINA
