@@ -113,18 +113,13 @@ def obtener_clima_estado(estado, lat, lon, reintentos=4):
 
 @st.cache_data(ttl=3600)  # Cache de 1 hora para reducir llamadas a la API
 def cargar_datos_masivos():
+    """Función pura de datos: sin elementos Streamlit dentro."""
     registros = []
-    progreso = st.progress(0, text="Iniciando consulta...")
-    total = len(ESTADOS)
-
-    for i, (estado, (lat, lon)) in enumerate(ESTADOS.items()):
-        progreso.progress((i + 1) / total, text=f"Consultando {estado}...")
+    for estado, (lat, lon) in ESTADOS.items():
         dato = obtener_clima_estado(estado, lat, lon)
         if dato:
             registros.append(dato)
-        time.sleep(0.3)  # Pequeña pausa entre peticiones para evitar rate limit
-
-    progreso.empty()
+        time.sleep(0.3)  # Pausa entre peticiones para evitar rate limit
     return pd.DataFrame(registros)
 
 # ==========================================
@@ -138,7 +133,16 @@ if st.button("🔄 Actualizar Temperaturas"):
 # CARGA DE DATOS
 # ==========================================
 
-with st.spinner("Consultando temperaturas actuales en tiempo real..."):
+progreso = st.progress(0, text="Iniciando consulta de temperaturas...")
+df = None
+
+total_estados = list(ESTADOS.items())
+for i, (estado, (lat, lon)) in enumerate(total_estados):
+    progreso.progress((i + 1) / len(total_estados), text=f"Consultando {estado}...")
+
+progreso.empty()
+
+with st.spinner("Cargando datos..."):
     df = cargar_datos_masivos()
 
 # ==========================================
