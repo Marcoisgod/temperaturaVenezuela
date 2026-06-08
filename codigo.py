@@ -149,7 +149,7 @@ if df is not None and not df.empty:
     fig_bar.update_layout(
         xaxis_title="Estado", yaxis_title="Temperatura (°C)", height=600
     )
-    st.plotly_chart(fig_bar, width="stretch")
+    st.plotly_chart(fig_bar, width="stretch", config={"displayModeBar": False})
 
     # ---- Mapa choropleth ------------------------------------
     st.subheader("🗺️ Mapa de Temperaturas")
@@ -173,7 +173,7 @@ if df is not None and not df.empty:
             showland=True, landcolor="lightgray",
         )
         fig_map.update_layout(height=700, margin=dict(l=0, r=0, t=50, b=0))
-        st.plotly_chart(fig_map, width="stretch")
+        st.plotly_chart(fig_map, width="stretch", config={"displayModeBar": False})
 
     except FileNotFoundError:
         fig_pts = px.scatter_geo(
@@ -189,7 +189,7 @@ if df is not None and not df.empty:
             scope="south america", center=dict(lat=8.0, lon=-66.0),
             projection_scale=6, visible=True, showcountries=True,
         )
-        st.plotly_chart(fig_pts, width="stretch")
+        st.plotly_chart(fig_pts, width="stretch", config={"displayModeBar": False})
 
 else:
     st.error(
