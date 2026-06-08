@@ -2,33 +2,52 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-# ==========================================
-# CONFIGURACIÓN
-# ==========================================
+# ======================================
+# CONFIG
+# ======================================
 
 st.set_page_config(
-    page_title="Temperaturas de Venezuela PRO",
-    page_icon="🌡️",
+    page_title="Weather Venezuela PRO",
+    page_icon="🌤️",
     layout="wide"
 )
 
-st.title("🌡️ Temperaturas Actuales por Estado de Venezuela")
+st.title("🌦️ Venezuela Weather Dashboard PRO")
 
-st.markdown("""
-Sistema de monitoreo climático en tiempo real utilizando:
+# ======================================
+# PRUEBA DIRECTA API
+# ======================================
 
-- Open-Meteo API
-- Streamlit
-- Plotly
-- Consultas paralelas optimizadas
-""")
+st.subheader("🔍 Diagnóstico Open-Meteo")
 
-# ==========================================
-# ESTADOS Y COORDENADAS
-# ==========================================
+try:
+
+    test_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        "?latitude=10.5"
+        "&longitude=-66.9"
+        "&current=temperature_2m,relative_humidity_2m,weather_code"
+    )
+
+    test = requests.get(test_url, timeout=15)
+
+    st.write("Código HTTP:", test.status_code)
+
+    if test.status_code == 200:
+        st.success("La API responde correctamente")
+        st.json(test.json())
+    else:
+        st.error("La API devolvió un error")
+        st.code(test.text)
+
+except Exception as e:
+    st.error(f"Error de conexión: {e}")
+
+# ======================================
+# ESTADOS
+# ======================================
 
 ESTADOS = {
     "Amazonas": (-5.6639, -67.6236),
@@ -56,9 +75,9 @@ ESTADOS = {
     "Zulia": (10.6545, -71.6533)
 }
 
-# ==========================================
-# INTERPRETAR CLIMA
-# ==========================================
+# ======================================
+# CLIMA
+# ======================================
 
 def interpretar_clima(codigo):
 
@@ -80,13 +99,11 @@ def interpretar_clima(codigo):
 
     return clima.get(codigo, "Sin datos")
 
-# ==========================================
-# CONSULTA DE UN ESTADO
-# ==========================================
+# ======================================
+# OBTENER UN ESTADO
+# ======================================
 
-def obtener_estado(datos):
-
-    estado, (lat, lon) = datos
+def obtener_estado(estado, lat, lon):
 
     url = (
         "https://api.open-meteo.com/v1/forecast"
@@ -95,24 +112,34 @@ def obtener_estado(datos):
         "&current=temperature_2m,relative_humidity_2m,weather_code"
     )
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
     try:
 
         r = requests.get(
             url,
-            headers=headers,
             timeout=15
         )
 
         if r.status_code != 200:
+
+            st.warning(
+                f"{estado}: HTTP {r.status_code}"
+            )
+
             return None
 
-        datos_api = r.json()
+        datos = r.json()
 
-        current = datos_api["current"]
+        if "current" not in datos:
+
+            st.warning(
+                f"{estado}: no existe 'current'"
+            )
+
+            st.json(datos)
+
+            return None
+
+        current = datos["current"]
 
         return {
             "Estado": estado,
@@ -125,52 +152,57 @@ def obtener_estado(datos):
             )
         }
 
-    except:
+    except Exception as e:
+
+        st.error(
+            f"{estado}: {e}"
+        )
+
         return None
 
-# ==========================================
-# CARGA MASIVA
-# ==========================================
+# ======================================
+# CARGAR DATOS
+# ======================================
 
 @st.cache_data(ttl=1800)
 def cargar_datos():
 
     registros = []
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    for estado, (lat, lon) in ESTADOS.items():
 
-        resultados = executor.map(
-            obtener_estado,
-            ESTADOS.items()
+        dato = obtener_estado(
+            estado,
+            lat,
+            lon
         )
 
-        for resultado in resultados:
-
-            if resultado is not None:
-                registros.append(resultado)
+        if dato:
+            registros.append(dato)
 
     return pd.DataFrame(registros)
 
-# ==========================================
-# BOTÓN ACTUALIZAR
-# ==========================================
+# ======================================
+# BOTÓN
+# ======================================
 
-if st.button("🔄 Actualizar Datos"):
+if st.button("🔄 Actualizar"):
 
     st.cache_data.clear()
-    st.rerun()
 
-# ==========================================
-# CARGA DE DATOS
-# ==========================================
+# ======================================
+# CARGA
+# ======================================
 
-with st.spinner("Consultando datos meteorológicos..."):
+df = cargar_datos()
 
-    df = cargar_datos()
+# ======================================
+# RESULTADOS
+# ======================================
 
-# ==========================================
-# VALIDACIÓN
-# ==========================================
+st.subheader("📊 DataFrame obtenido")
+
+st.write(df)
 
 if df.empty:
 
@@ -178,148 +210,28 @@ if df.empty:
         "No fue posible obtener datos climáticos."
     )
 
-    st.stop()
+else:
 
-# ==========================================
-# MÉTRICAS
-# ==========================================
+    st.success(
+        f"Estados cargados: {len(df)}"
+    )
+
+    fig = px.scatter_geo(
+        df,
+        lat="Latitud",
+        lon="Longitud",
+        hover_name="Estado",
+        color="Temperatura",
+        size="Temperatura"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
 st.divider()
 
-col1, col2, col3 = st.columns(3)
-
-temp_max = df.loc[df["Temperatura"].idxmax()]
-temp_min = df.loc[df["Temperatura"].idxmin()]
-temp_prom = round(df["Temperatura"].mean(), 1)
-
-with col1:
-
-    st.metric(
-        "🔥 Más Caluroso",
-        temp_max["Estado"],
-        f"{temp_max['Temperatura']} °C"
-    )
-
-with col2:
-
-    st.metric(
-        "❄️ Más Fresco",
-        temp_min["Estado"],
-        f"{temp_min['Temperatura']} °C"
-    )
-
-with col3:
-
-    st.metric(
-        "📊 Promedio Nacional",
-        f"{temp_prom} °C"
-    )
-
-# ==========================================
-# TABLA
-# ==========================================
-
-st.divider()
-
-st.subheader("📋 Temperaturas por Estado")
-
-df_ordenado = df.sort_values(
-    by="Temperatura",
-    ascending=False
+st.caption(
+    f"Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
 )
-
-st.dataframe(
-    df_ordenado,
-    use_container_width=True
-)
-
-# ==========================================
-# GRÁFICO DE BARRAS
-# ==========================================
-
-st.divider()
-
-st.subheader("📈 Comparación de Temperaturas")
-
-fig_bar = px.bar(
-    df_ordenado,
-    x="Estado",
-    y="Temperatura",
-    color="Temperatura",
-    text="Temperatura",
-    color_continuous_scale="RdYlBu_r"
-)
-
-fig_bar.update_layout(
-    height=600,
-    xaxis_title="Estado",
-    yaxis_title="Temperatura (°C)"
-)
-
-st.plotly_chart(
-    fig_bar,
-    use_container_width=True
-)
-
-# ==========================================
-# MAPA
-# ==========================================
-
-st.divider()
-
-st.subheader("🗺️ Temperaturas de Venezuela")
-
-fig_mapa = px.scatter_geo(
-    df,
-    lat="Latitud",
-    lon="Longitud",
-    color="Temperatura",
-    size="Temperatura",
-    hover_name="Estado",
-    hover_data={
-        "Humedad": True,
-        "Clima": True,
-        "Latitud": False,
-        "Longitud": False
-    },
-    projection="natural earth",
-    color_continuous_scale="RdYlBu_r"
-)
-
-fig_mapa.update_geos(
-    scope="south america",
-    center=dict(lat=8, lon=-66),
-    projection_scale=6,
-    showcountries=True,
-    showland=True
-)
-
-fig_mapa.update_layout(
-    height=700
-)
-
-st.plotly_chart(
-    fig_mapa,
-    use_container_width=True
-)
-
-# ==========================================
-# PIE DE PÁGINA
-# ==========================================
-
-st.divider()
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    st.markdown(
-        "**Dashboard Climático Venezuela PRO**"
-    )
-
-with col2:
-
-    st.caption(
-        f"Última actualización: "
-        f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-    )
