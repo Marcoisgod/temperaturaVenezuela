@@ -67,20 +67,28 @@ HEADERS = {
 }
 
 def obtener_clima_wttr(estado, lat, lon):
-    """Consulta wttr.in para una coordenada."""
-    url = f"https://wttr.in/{lat},{lon}?format=j1"
+    """Consulta wttr.in para una coordenada en español."""
+    # Añadimos &lang=es para que la API traduzca la descripción del clima
+    url = f"https://wttr.in/{lat},{lon}?format=j1&lang=es"
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
         if r.status_code == 200:
             data = r.json()
             cc = data["current_condition"][0]
+            
+            # wttr.in a veces devuelve la traducción en el campo "lang_es" 
+            # si no existe, cae de maduro a "weatherDesc"
+            clima_es = cc.get("lang_es", [{}])[0].get("value", None)
+            if not clima_es:
+                clima_es = cc["weatherDesc"][0]["value"]
+
             return {
                 "Estado":      estado,
                 "Latitud":     lat,
                 "Longitud":    lon,
                 "Temperatura": float(cc["temp_C"]),
                 "Humedad":     int(cc["humidity"]),
-                "Clima":       cc["weatherDesc"][0]["value"],
+                "Clima":       clima_es,  # <--- Guardamos el resultado en español
             }
     except Exception:
         pass
