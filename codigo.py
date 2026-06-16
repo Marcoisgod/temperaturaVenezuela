@@ -71,7 +71,7 @@ def obtener_clima_wttr(estado, lat, lon):
     # Añadimos &lang=es para que la API traduzca la descripción del clima
     url = f"https://wttr.in/{lat},{lon}?format=j1&lang=es"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code == 200:
             data = r.json()
             cc = data["current_condition"][0]
